@@ -1,0 +1,40 @@
+#!/Users/sharp/Library/Caches/pypoetry/virtualenvs/poetry-update-all-0SPp_ebK-py3.12/bin/python3
+import re
+import subprocess
+import tomllib
+
+import requests
+from packaging.version import Version
+
+with open("pyproject.toml", "rb") as f:
+    project = tomllib.load(f)
+for k, v in project["tool"]["poetry"]["dependencies"].items():
+    if k == "python":
+        continue
+    if isinstance(v, str) and (v.startswith("==") or re.match(r"^\d.*", v)):
+        print(f"Skip {k}")
+        continue
+    print(f"Checking {k} ... ")
+    pkg = k
+    command = ["poetry", "add", f"{pkg}@latest"]
+    if isinstance(v, dict):
+        if "extras" in v:
+            pkg = f'{k}[{",".join(v["extras"])}]'
+        if "source" in v:
+            command += ["--source", v["source"]]
+        current_version = Version(re.sub("[>=<^~]", "", v["version"]))
+    else:
+        current_version = Version(re.sub("[>=<^~]", "", v))
+    releases = requests.get(f"https://pypi.org/pypi/{k}/json").json()["releases"]
+
+    pypi_versions = filter(lambda item: all(map(lambda x: x.get("yanked", False) is False, item[1])), releases.items())
+    pypi_versions = filter(lambda x: not (x.is_devrelease or x.is_prerelease),
+                           map(lambda x: Version(x[0]), pypi_versions))
+    pypi_version = max(pypi_versions)
+    if current_version < pypi_version:
+        if current_version.major != pypi_version.major:
+            print(f"Updating {k} from {current_version} to {pypi_version}, major version update.")
+        else:
+            print(f"Updating {k} from {current_version} to {pypi_version}.")
+        print(command)
+        subprocess.run(command)
